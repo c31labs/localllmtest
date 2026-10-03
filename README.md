@@ -145,7 +145,7 @@ Every test sends a realistic prompt, then grades the answer with automatic check
 | `coding_fix` | Find and fix bugs in a function | The fixed code is **executed against hidden tests**, plus both bugs are explained |
 | `agent_json` | Strict JSON for an automation pipeline | Raw JSON only (no fences or chatter), all schema keys, correct ISO 8601 time with the Sydney offset, valid enum value, tag rules, integer type |
 | `languages` | Translate a business message to Italian and Mexican Spanish | Valid JSON, both languages present and recognisable, time preserved, no English left over |
-| `long_context` | Find one fact buried in a ~12k token document | The whole prompt was actually read (not silently truncated), correct date and approver found |
+| `long_context` | Find one fact buried in a ~8k token document | The whole prompt was actually read (not silently truncated), correct date and approver found |
 | `hallucination` | Ask about an agreement that does not exist | Admits it does not know or doubts it exists, and does not list invented provisions |
 | `refusal` | Five legitimate but edgy requests | Answers each without refusing: a comedic roast, a phishing example for staff training, a novel villain monologue, scam tactics to warn elderly parents, brutally honest career feedback |
 | `speed` | A 300 word explanation | Generation speed of at least 15 tok/s (comfortable) and 8 tok/s (usable), first token in under 5 seconds |
@@ -214,7 +214,7 @@ Model availability changes quickly. Check [ollama.com/search](https://ollama.com
 
 * Close browsers and games while testing; they share the GPU.
 * Run one model at a time. Set `OLLAMA_KEEP_ALIVE=0` if you switch models often, so the previous one is unloaded straight away.
-* The suite sets `num_ctx` to 8192 for most tests and 16384 for the long context test. Larger contexts use more VRAM.
+* The suite sets `num_ctx` to 16384 for every test, so thinking models have room to answer. Larger contexts use more VRAM.
 
 ---
 
@@ -267,7 +267,7 @@ The house style used by the writing tests is the `STYLE_SYSTEM` string near the 
    "my_test": 1,
    ```
 
-`grade` receives the model's reply (with any `<think>` blocks removed), timing stats (`tok_per_s`, `ttft_s`, `prompt_tokens`, `wall_s`) and a result object. Each `r.check(name, passed, detail)` becomes one PASS or FAIL line in the report.
+`grade` receives the model's reply (with any `<think>` blocks removed), timing stats (`tok_per_s`, `ttft_s`, `prompt_tokens`, `wall_s`, `thinking_chars`, `done_reason`) and a result object. Each `r.check(name, passed, detail)` becomes one PASS or FAIL line in the report.
 
 Useful helpers already in the script: `words()`, `dash_issues()`, `us_spellings()`, `refused()`, `extract_json()`, `extract_code()` and `run_python()`.
 
@@ -287,6 +287,7 @@ Edit `verdict()` and `WEIGHTS` near the bottom of the script.
 | Everything is very slow | Run `ollama ps`. If it shows a CPU share, the model does not fit in VRAM. Try a smaller model or close other GPU apps. |
 | `long_context` fails on "prompt fully read" | The model or Ollama truncated the input. Try a model with a larger context window, or more VRAM. |
 | A reasoning model fails the JSON tests | Try `--think off`. Thinking output can leak into strict formats. |
+| A test fails with `produced an answer (spent its whole budget thinking)` | The model thought until it ran out of room and never answered. Re run with `--think off`. This is common with Gemma 4 and Qwen3 on long tasks. |
 | Request timed out | Each call allows 15 minutes. If a model is that slow it is not practical for daily use anyway. |
 
 ---
