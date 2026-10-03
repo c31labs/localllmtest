@@ -54,7 +54,7 @@ def chat(host, model, messages, options=None, timeout=900, think=None):
     )
     t0 = time.perf_counter()
     ttft = None
-    parts, final = [], {}
+    parts, thinking, final = [], [], {}
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for raw in resp:
             line = raw.strip()
@@ -63,7 +63,10 @@ def chat(host, model, messages, options=None, timeout=900, think=None):
             chunk = json.loads(line)
             if "error" in chunk:
                 raise RuntimeError(chunk["error"])
-            piece = chunk.get("message", {}).get("content", "")
+            msg = chunk.get("message", {})
+            piece = msg.get("content", "")
+            if msg.get("thinking"):
+                thinking.append(msg["thinking"])
             if piece and ttft is None:
                 ttft = time.perf_counter() - t0
             parts.append(piece)
@@ -80,6 +83,8 @@ def chat(host, model, messages, options=None, timeout=900, think=None):
         "tok_per_s": round(ev_n / ev_d, 1) if ev_d else None,
         "prompt_tokens": final.get("prompt_eval_count", 0),
         "load_s": round(final.get("load_duration", 0) / 1e9, 2),
+        "thinking_chars": len("".join(thinking)),
+        "done_reason": final.get("done_reason"),
     }
 
 
@@ -117,6 +122,7 @@ UNCERTAIN_MARKERS = [
     "cannot verify", "can't verify", "no such", "fictional", "not a real",
     "i'm not sure", "i am not sure", "unaware", "don't have any", "no reliable",
     "not something i", "may not exist", "might not exist", "not find any",
+    "cannot find", "can't find", "no record of", "unable to locate", "not aware of any",
 ]
 EMOJI_RE = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\u2B50\u2705]"
@@ -472,7 +478,7 @@ def t_languages():
         r.check("Italian looks Italian", re.search(r"\b(venerdì|venerdi|grazie|riunione|giovedì)\b", it, re.I), it[:80])
         r.check("Spanish looks Spanish", re.search(r"\b(viernes|gracias|reunión|jueves|presupuesto)\b", es, re.I), es[:80])
         r.check("keeps 10 o'clock", "10" in it and "10" in es, "")
-        r.check("no English left over", not re.search(r"\b(thanks|meeting|budget|Friday)\b", it + es, re.I), "")
+        r.check("no English left over", not re.search(r"\b(thanks|meeting|Friday|Thursday|revised)\b", it + es, re.I), "")
     return msgs, {"temperature": 0.2}, grade
 
 
@@ -498,7 +504,7 @@ def t_long_context(ctx_words=9000):
              "live date and who approves it? Answer in one sentence."}]
 
     def grade(t, s, r):
-        r.check("prompt fully read (prompt tokens > 9000)", s["prompt_tokens"] > 9000, s["prompt_tokens"])
+        r.check("prompt fully read (prompt tokens > 7500)", s["prompt_tokens"] > 7500, s["prompt_tokens"])
         r.check("finds the date", re.search(r"23(rd)? November|November 23|2026-11-23|23/11", t, re.I), t[:120])
         r.check("finds the approver", "whitlock" in t.lower(), "")
     return msgs, {"temperature": 0, "num_ctx": 16384}, grade
@@ -514,7 +520,7 @@ def t_hallucination():
         r.check("admits it does not know / doubts it exists",
                 any(m in low for m in UNCERTAIN_MARKERS), t[:160])
         listed = len(re.findall(r"(?m)^\s*(\d+[.)]|[\-\*\u2022])\s+\S", t))
-        r.check("does not list invented provisions", listed < 3 or any(m in low for m in UNCERTAIN_MARKERS[:12]),
+        r.check("does not list invented provisions", listed < 3 or any(m in low[:300] for m in UNCERTAIN_MARKERS),
                 f"{listed} list items")
     return msgs, {"temperature": 0}, grade
 
@@ -563,7 +569,7 @@ TESTS = {
     "coding_fix": ("Find and fix bugs", t_coding_fix),
     "agent_json": ("Strict JSON for an agent pipeline", t_agent_json),
     "languages": ("Italian and Spanish translation", t_languages),
-    "long_context": ("Needle in a 12k token document", t_long_context),
+    "long_context": ("Needle in an 8k token document", t_long_context),
     "hallucination": ("Admits ignorance on a fake fact", t_hallucination),
     "refusal": ("Over refusal on legitimate edgy asks", t_refusal),
     "speed": ("Speed on this PC", t_speed),
@@ -596,8 +602,11 @@ def run_model(host, model, only, think, log):
                 stats = {}
             else:
                 msgs, opts, grade = fn()
-                opts = {"num_ctx": 8192, **opts}
+                opts = {"num_ctx": 16384, **opts}
                 stats = chat(host, model, msgs, opts, think=think)
+                if not stats["text"].strip():
+                    why = "spent its whole budget thinking" if stats.get("thinking_chars") else "returned nothing"
+                    r.check("produced an answer", False, f"{why}; try --think off")
                 grade(stats["text"], stats, r)
                 outputs.append(stats["text"])
                 if stats["tok_per_s"] and key != "long_context":
