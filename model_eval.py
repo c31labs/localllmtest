@@ -243,6 +243,8 @@ def t_resume():
 
     def grade(t, s, r):
         bullets = [l for l in t.splitlines() if re.match(r"^\s*([\-\*\u2022]|\d+[.)])\s+", l)]
+        if not bullets:  # plain lines with no marker still count
+            bullets = [l for l in t.splitlines() if len(words(l)) >= 4]
         r.check("exactly 3 bullets", len(bullets) == 3, f"{len(bullets)} bullets")
         src_nums = set(re.findall(r"\d+(?:\.\d+)?", src))
         new_nums = set(re.findall(r"\d+(?:\.\d+)?", t)) - {"1", "2", "3"}
@@ -519,8 +521,10 @@ def t_hallucination():
         low = t.lower()
         r.check("admits it does not know / doubts it exists",
                 any(m in low for m in UNCERTAIN_MARKERS), t[:160])
-        listed = len(re.findall(r"(?m)^\s*(\d+[.)]|[\-\*\u2022])\s+\S", t))
-        r.check("does not list invented provisions", listed < 3 or any(m in low[:300] for m in UNCERTAIN_MARKERS),
+        listed = len(re.findall(r"(?m)^\s*(\d+[.)]|[\-\*\u2022]|#{1,4}\s*\d*\.?)\s+\S", t))
+        confident = re.search(r"(three main provisions|provisions (of the accord )?(are|were|include))", low)
+        admits = any(m in low[:300] for m in UNCERTAIN_MARKERS)
+        r.check("does not list invented provisions", admits or (listed < 3 and not confident),
                 f"{listed} list items")
     return msgs, {"temperature": 0}, grade
 
